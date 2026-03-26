@@ -148,7 +148,7 @@ with st.sidebar:
     st.divider()
     mode = st.radio(
         "Mode",
-        ["Top Committees & Candidates", "Committee Donor Drill-Down"],
+        ["Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
     )
 
 # ─────────────────────────────────────────────
@@ -245,6 +245,58 @@ if mode == "Top Committees & Candidates":
         st.dataframe(view[display_cols], use_container_width=True, height=600)
 
 # ─────────────────────────────────────────────
+# MODE 3: CANDIDATE LOOKUP
+# ─────────────────────────────────────────────
+elif mode == "Candidate Lookup":
+    st.markdown("## Candidate → Committee Lookup")
+    st.divider()
+    st.caption("Paste a candidate ID (starts with H, S, or P) to find their linked committee IDs.")
+
+    cand_id_input = st.text_input("Candidate ID", placeholder="e.g. S2HI00106")
+    lookup_btn    = st.button("LOOK UP COMMITTEES", use_container_width=True)
+
+    if lookup_btn:
+        if not cand_id_input:
+            st.warning("Enter a candidate ID first.")
+        else:
+            try:
+                r = requests.get(f'{BASE_URL}/candidate/{cand_id_input.strip()}/committees/', params={
+                    'api_key': api_key, 'per_page': 20,
+                })
+                r.raise_for_status()
+                results = r.json().get('results', [])
+                if not results:
+                    st.warning("No committees found for that candidate ID.")
+                else:
+                    # also fetch candidate name
+                    rc = requests.get(f'{BASE_URL}/candidate/{cand_id_input.strip()}/', params={'api_key': api_key})
+                    cand_name = rc.json()['results'][0]['name'] if rc.ok and rc.json().get('results') else cand_id_input
+
+                    st.success(f"**{cand_name}** — {len(results)} committee(s) found")
+                    rows = []
+                    for c in results:
+                        rows.append({
+                            'committee_id':   c.get('committee_id'),
+                            'name':           c.get('name'),
+                            'designation':    c.get('designation_full'),
+                            'type':           c.get('committee_type_full'),
+                            'party':          c.get('party_full') or '—',
+                            'first_filed':    c.get('first_file_date') or '—',
+                        })
+                    df_comms = pd.DataFrame(rows)
+                    st.dataframe(df_comms, use_container_width=True)
+
+                    principal = [r for r in results if r.get('designation') == 'P']
+                    if principal:
+                        cid = principal[0]['committee_id']
+                        st.info(f"Principal campaign committee: **{cid}** — copy this into the Donor Drill-Down tab.")
+                    else:
+                        st.caption("No principal campaign committee found. Use any C-prefixed ID above in the Donor Drill-Down tab.")
+
+            except requests.HTTPError as e:
+                st.error(f"API error: {e}")
+
+# ─────────────────────────────────────────────
 # MODE 2
 # ─────────────────────────────────────────────
 else:
@@ -253,7 +305,7 @@ else:
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        committee_id = st.text_input("Committee ID", placeholder="e.g. C00815753")
+        committee_id_raw = st.text_input("Committee or Candidate ID", placeholder="e.g. C00815753 or S2HI00106")
     with col2:
         cycles = st.multiselect("Cycles", [2026, 2024, 2022, 2020], default=[2026, 2024, 2022])
     with col3:
@@ -265,10 +317,30 @@ else:
     run2 = st.button("FETCH DONORS", use_container_width=True)
 
     if run2:
-        if not committee_id:
-            st.warning("Enter a committee ID first.")
+        if not committee_id_raw:
+            st.warning("Enter a committee or candidate ID first.")
         else:
             try:
+                raw_id = committee_id_raw.strip().upper()
+
+                # Auto-resolve candidate ID -> principal committee ID
+                if raw_id.startswith(('H', 'S', 'P')):
+                    with st.spinner(f"Resolving candidate {raw_id} to committee..."):
+                        r = requests.get(f'{BASE_URL}/candidate/{raw_id}/committees/', params={
+                            'api_key': api_key, 'per_page': 20,
+                        })
+                        r.raise_for_status()
+                        comms = r.json().get('results', [])
+                        principal = [c for c in comms if c.get('designation') == 'P']
+                        chosen = principal[0] if principal else (comms[0] if comms else None)
+                        if not chosen:
+                            st.error(f"No committees found for candidate {raw_id}.")
+                            st.stop()
+                        committee_id = chosen['committee_id']
+                        st.info(f"Candidate {raw_id} → resolved to committee **{committee_id}** ({chosen['name']})")
+                else:
+                    committee_id = raw_id
+
                 r = requests.get(f'{BASE_URL}/committees/', params={
                     'api_key': api_key, 'committee_id': committee_id, 'per_page': 1
                 })
