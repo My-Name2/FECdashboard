@@ -9,72 +9,129 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- STYLING ---
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'IBM Plex Sans', sans-serif;
+html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+    background-color: #0f0f0f !important;
+    color: #e8e8e8 !important;
+    font-family: 'IBM Plex Sans', sans-serif !important;
 }
-h1, h2, h3 {
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div {
+    background-color: #141414 !important;
+    border-right: 1px solid #2a2a2a !important;
+}
+input, textarea,
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-baseweb="base-input"],
+[data-baseweb="input"] > div {
+    background-color: #1e1e1e !important;
+    color: #e8e8e8 !important;
+    border-color: #333 !important;
+}
+[data-baseweb="select"] > div,
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[role="listbox"] {
+    background-color: #1e1e1e !important;
+    color: #e8e8e8 !important;
+    border-color: #333 !important;
+}
+[role="option"], li[role="option"] {
+    background-color: #1e1e1e !important;
+    color: #e8e8e8 !important;
+}
+[role="option"]:hover {
+    background-color: #2a2a2a !important;
+}
+label, p, span,
+[data-testid="stWidgetLabel"] p,
+[data-testid="stMarkdownContainer"] p {
+    color: #ccc !important;
+    font-family: 'IBM Plex Sans', sans-serif !important;
+}
+h1, h2, h3, h4 {
     font-family: 'IBM Plex Mono', monospace !important;
+    color: #e8e8e8 !important;
 }
-.stApp {
-    background-color: #0d0d0d;
-    color: #e8e8e8;
+[data-testid="stButton"] button {
+    background-color: #c8f542 !important;
+    color: #0f0f0f !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-weight: 600 !important;
+    border: none !important;
+    letter-spacing: 1px !important;
 }
-section[data-testid="stSidebar"] {
-    background-color: #111 !important;
-    border-right: 1px solid #2a2a2a;
+[data-testid="stButton"] button:hover {
+    background-color: #aed438 !important;
+    color: #0f0f0f !important;
 }
-.metric-box {
-    background: #161616;
-    border: 1px solid #2a2a2a;
-    border-left: 3px solid #c8f542;
-    padding: 14px 18px;
-    border-radius: 2px;
-    margin-bottom: 8px;
+[data-testid="metric-container"] {
+    background-color: #1a1a1a !important;
+    border: 1px solid #2a2a2a !important;
+    border-left: 3px solid #c8f542 !important;
+    padding: 14px !important;
+    border-radius: 2px !important;
 }
-.metric-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: #666;
-    margin-bottom: 4px;
+[data-testid="stMetricValue"] {
+    color: #c8f542 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 1.4rem !important;
 }
-.metric-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 22px;
-    font-weight: 600;
-    color: #c8f542;
+[data-testid="stMetricLabel"] p {
+    color: #666 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 10px !important;
+    letter-spacing: 2px !important;
+    text-transform: uppercase !important;
 }
-.tag {
-    display: inline-block;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 2px;
-    margin-right: 4px;
-    background: #1e1e1e;
-    border: 1px solid #333;
-    color: #aaa;
+[data-testid="stDataFrame"] {
+    border: 1px solid #2a2a2a !important;
 }
-.header-bar {
-    border-bottom: 1px solid #2a2a2a;
-    padding-bottom: 12px;
-    margin-bottom: 24px;
+[data-testid="stAlert"] {
+    background-color: #1a1a1a !important;
+    border-color: #333 !important;
+    color: #ccc !important;
+}
+hr { border-color: #2a2a2a !important; }
+[data-testid="stCaptionContainer"] p { color: #555 !important; }
+[data-baseweb="tag"] {
+    background-color: #2a2a2a !important;
+    color: #c8f542 !important;
+}
+[data-testid="stRadio"] label { color: #ccc !important; }
+[data-testid="stNumberInput"] button {
+    background-color: #2a2a2a !important;
+    color: #e8e8e8 !important;
+    border-color: #333 !important;
 }
 </style>
 """, unsafe_allow_html=True)
+
+# also write a .streamlit/config.toml so the theme is set at the app level
+import os, pathlib
+cfg_dir = pathlib.Path(".streamlit")
+cfg_dir.mkdir(exist_ok=True)
+cfg_path = cfg_dir / "config.toml"
+if not cfg_path.exists():
+    cfg_path.write_text("""
+[theme]
+base = "dark"
+backgroundColor = "#0f0f0f"
+secondaryBackgroundColor = "#141414"
+textColor = "#e8e8e8"
+primaryColor = "#c8f542"
+font = "monospace"
+""")
 
 BASE_URL = 'https://api.open.fec.gov/v1'
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.markdown("### 🏛️ FEC Explorer")
-    st.markdown("---")
+    st.markdown("## 🏛️ FEC Explorer")
+    st.divider()
 
     api_key = st.text_input(
         "FEC API Key",
@@ -84,22 +141,22 @@ with st.sidebar:
     )
     if not api_key:
         api_key = "DEMO_KEY"
-        st.caption("Using DEMO_KEY (30 req/hr). Add your key above for 1,000 req/hr.")
+        st.caption("⚠ DEMO_KEY active (30 req/hr)")
     else:
-        st.success("Using your API key", icon="✓")
+        st.caption("✓ Custom key active")
 
-    st.markdown("---")
+    st.divider()
     mode = st.radio(
         "Mode",
         ["Top Committees & Candidates", "Committee Donor Drill-Down"],
-        label_visibility="collapsed",
     )
 
 # ─────────────────────────────────────────────
-# MODE 1: TOP COMMITTEES + CANDIDATES
+# MODE 1
 # ─────────────────────────────────────────────
 if mode == "Top Committees & Candidates":
-    st.markdown('<div class="header-bar"><h2>Top Committees & Candidates by Receipts</h2></div>', unsafe_allow_html=True)
+    st.markdown("## Top Committees & Candidates by Receipts")
+    st.divider()
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -107,97 +164,80 @@ if mode == "Top Committees & Candidates":
     with col2:
         top_n = st.slider("Results to fetch", 50, 500, 200, step=50)
     with col3:
-        search_query = st.text_input("🔍 Filter by name", placeholder="e.g. Trump, DNC, AIPAC...")
+        search_query = st.text_input("Filter by name", placeholder="e.g. Trump, DNC, AIPAC...")
 
-    run = st.button("Fetch Data", type="primary", use_container_width=True)
+    run = st.button("FETCH DATA", use_container_width=True)
 
     if run:
-        def fetch_pages(endpoint, params, top_n):
+        def fetch_pages(endpoint, params, n):
             results, page = [], 1
-            bar = st.progress(0, text=f"Fetching {endpoint}...")
-            while len(results) < top_n:
+            bar = st.progress(0, text="Fetching...")
+            while len(results) < n:
                 r = requests.get(f'{BASE_URL}{endpoint}', params={**params, 'page': page})
                 r.raise_for_status()
                 batch = r.json().get('results', [])
                 if not batch:
                     break
                 results.extend(batch)
-                bar.progress(min(len(results) / top_n, 1.0), text=f"{endpoint}: {len(results)} records")
+                bar.progress(min(len(results) / n, 1.0), text=f"{len(results)} records")
                 page += 1
                 time.sleep(0.2)
             bar.empty()
-            return results[:top_n]
+            return results[:n]
 
-        with st.spinner("Pulling data..."):
-            try:
-                comm_results = fetch_pages('/totals/committees/', {
-                    'api_key': api_key, 'cycle': cycle,
-                    'sort': '-receipts', 'sort_hide_null': True, 'per_page': 100,
-                }, top_n)
-                comm_df = pd.json_normalize(comm_results)
-                comm_df = comm_df.rename(columns={'committee_name': 'name'})
-                comm_df['entity'] = 'Committee'
+        try:
+            comm_results = fetch_pages('/totals/committees/', {
+                'api_key': api_key, 'cycle': cycle,
+                'sort': '-receipts', 'sort_hide_null': True, 'per_page': 100,
+            }, top_n)
+            comm_df = pd.json_normalize(comm_results)
+            comm_df = comm_df.rename(columns={'committee_name': 'name'})
+            comm_df['entity'] = 'Committee'
 
-                cand_results = fetch_pages('/candidates/totals/', {
-                    'api_key': api_key, 'cycle': cycle,
-                    'sort': '-receipts', 'sort_hide_null': True, 'per_page': 100,
-                }, top_n)
-                cand_df = pd.json_normalize(cand_results)
-                cand_df['entity'] = 'Candidate'
-                cand_df['committee_id']        = cand_df.get('candidate_id',   pd.Series(dtype=str))
-                cand_df['committee_type_full'] = cand_df.get('office_full',    pd.Series(dtype=str))
+            cand_results = fetch_pages('/candidates/totals/', {
+                'api_key': api_key, 'cycle': cycle,
+                'sort': '-receipts', 'sort_hide_null': True, 'per_page': 100,
+            }, top_n)
+            cand_df = pd.json_normalize(cand_results)
+            cand_df['entity']              = 'Candidate'
+            cand_df['committee_id']        = cand_df.get('candidate_id',  pd.Series(dtype=str))
+            cand_df['committee_type_full'] = cand_df.get('office_full',   pd.Series(dtype=str))
 
-                COMMON = ['entity', 'committee_id', 'name', 'committee_type_full',
-                          'party_full', 'state', 'receipts', 'disbursements', 'coverage_end_date']
+            COMMON = ['entity', 'committee_id', 'name', 'committee_type_full',
+                      'party_full', 'state', 'receipts', 'disbursements', 'coverage_end_date']
 
-                def trim(df):
-                    return df[[c for c in COMMON if c in df.columns]].copy()
+            def trim(df):
+                return df[[c for c in COMMON if c in df.columns]].copy()
 
-                combined = pd.concat([trim(comm_df), trim(cand_df)], ignore_index=True)
-                combined['receipts']      = pd.to_numeric(combined['receipts'],      errors='coerce')
-                combined['disbursements'] = pd.to_numeric(combined['disbursements'], errors='coerce')
-                combined['cash_on_hand']  = combined['receipts'] - combined['disbursements']
-                combined['burn_rate']     = (combined['disbursements'] / combined['receipts'] * 100).round(1)
-                combined = (combined
-                    .drop_duplicates(subset='committee_id')
-                    .sort_values('receipts', ascending=False)
-                    .reset_index(drop=True))
-                combined.index += 1
+            combined = pd.concat([trim(comm_df), trim(cand_df)], ignore_index=True)
+            combined['receipts']      = pd.to_numeric(combined['receipts'],      errors='coerce')
+            combined['disbursements'] = pd.to_numeric(combined['disbursements'], errors='coerce')
+            combined['cash_on_hand']  = combined['receipts'] - combined['disbursements']
+            combined['burn_rate']     = (combined['disbursements'] / combined['receipts'] * 100).round(1)
+            combined = (combined
+                .drop_duplicates(subset='committee_id')
+                .sort_values('receipts', ascending=False)
+                .reset_index(drop=True))
+            combined.index += 1
+            st.session_state['combined'] = combined
 
-                st.session_state['combined'] = combined
-
-            except requests.HTTPError as e:
-                st.error(f"API error: {e}")
+        except requests.HTTPError as e:
+            st.error(f"API error: {e}")
 
     if 'combined' in st.session_state:
         combined = st.session_state['combined']
+        view = combined[combined['name'].str.contains(search_query, case=False, na=False)] if search_query else combined
 
-        # apply search filter
-        if search_query:
-            mask = combined['name'].str.contains(search_query, case=False, na=False)
-            view = combined[mask]
-        else:
-            view = combined
-
-        # summary metrics
         c1, c2, c3, c4 = st.columns(4)
-        metrics = [
-            ("Total Rows", f"{len(view):,}"),
-            ("Total Receipts", f"${view['receipts'].sum():,.0f}"),
-            ("Total Disbursed", f"${view['disbursements'].sum():,.0f}"),
-            ("Median Receipts", f"${view['receipts'].median():,.0f}"),
-        ]
-        for col, (label, val) in zip([c1,c2,c3,c4], metrics):
-            with col:
-                st.markdown(f"""
-                <div class="metric-box">
-                    <div class="metric-label">{label}</div>
-                    <div class="metric-value">{val}</div>
-                </div>""", unsafe_allow_html=True)
+        c1.metric("Total Rows",      f"{len(view):,}")
+        c2.metric("Total Receipts",  f"${view['receipts'].sum():,.0f}")
+        c3.metric("Total Disbursed", f"${view['disbursements'].sum():,.0f}")
+        c4.metric("Median Receipts", f"${view['receipts'].median():,.0f}")
 
         if search_query:
-            st.caption(f"Showing {len(view):,} results matching '{search_query}'")
+            st.caption(f"{len(view):,} results for '{search_query}'")
 
+        st.divider()
         display_cols = ['committee_id', 'entity', 'name', 'committee_type_full',
                         'party_full', 'state', 'receipts', 'disbursements',
                         'cash_on_hand', 'burn_rate', 'coverage_end_date']
@@ -205,10 +245,11 @@ if mode == "Top Committees & Candidates":
         st.dataframe(view[display_cols], use_container_width=True, height=600)
 
 # ─────────────────────────────────────────────
-# MODE 2: COMMITTEE DONOR DRILL-DOWN
+# MODE 2
 # ─────────────────────────────────────────────
 else:
-    st.markdown('<div class="header-bar"><h2>Committee Donor Drill-Down</h2></div>', unsafe_allow_html=True)
+    st.markdown("## Committee Donor Drill-Down")
+    st.divider()
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -220,9 +261,8 @@ else:
     with col4:
         max_records = st.number_input("Max records per cycle", value=1000, step=100)
 
-    search_query = st.text_input("🔍 Filter donors by name, employer, or occupation", placeholder="e.g. Goldman, Retired, Smith...")
-
-    run2 = st.button("Fetch Donors", type="primary", use_container_width=True)
+    search_query = st.text_input("Filter donors", placeholder="Name, employer, or occupation...")
+    run2 = st.button("FETCH DONORS", use_container_width=True)
 
     if run2:
         if not committee_id:
@@ -235,20 +275,20 @@ else:
                 r.raise_for_status()
                 res = r.json().get('results', [])
                 comm_name = res[0]['name'] if res else committee_id
-                st.info(f"Committee: **{comm_name}** ({committee_id})")
+                st.info(f"**{comm_name}** ({committee_id})")
 
                 def pull_cycle(cycle, max_rec):
                     records, last_index, last_date = [], None, None
                     while len(records) < max_rec:
                         params = {
-                            'api_key': api_key,
-                            'committee_id': committee_id,
+                            'api_key':                     api_key,
+                            'committee_id':                committee_id,
                             'two_year_transaction_period': cycle,
-                            'min_amount': min_donation,
-                            'entity_type': 'IND',
-                            'sort': '-contribution_receipt_amount',
-                            'per_page': 100,
-                            'sort_hide_null': True,
+                            'min_amount':                  min_donation,
+                            'entity_type':                 'IND',
+                            'sort':                        '-contribution_receipt_amount',
+                            'per_page':                    100,
+                            'sort_hide_null':              True,
                         }
                         if last_index: params['last_index']                       = last_index
                         if last_date:  params['last_contribution_receipt_amount'] = last_date
@@ -313,11 +353,9 @@ else:
                 st.error(f"API error: {e}")
 
     if 'agg' in st.session_state:
-        agg       = st.session_state['agg']
-        df        = st.session_state['df_raw']
-        comm_name = st.session_state['comm_name']
+        agg = st.session_state['agg']
+        df  = st.session_state['df_raw']
 
-        # apply search filter
         if search_query:
             mask = (
                 agg['contributor_name'].str.contains(search_query, case=False, na=False) |
@@ -329,24 +367,16 @@ else:
             view = agg
 
         c1, c2, c3, c4, c5 = st.columns(5)
-        metrics = [
-            ("Unique Donors", f"{len(view):,}"),
-            ("Total Raised", f"${view['total_given'].sum():,.0f}"),
-            ("Median Gift", f"${df['contribution_receipt_amount'].median():,.0f}"),
-            ("Repeat Donors", f"{view['repeat_donor'].sum():,}"),
-            ("Multi-Cycle", f"{view['multi_cycle'].sum():,}"),
-        ]
-        for col, (label, val) in zip([c1,c2,c3,c4,c5], metrics):
-            with col:
-                st.markdown(f"""
-                <div class="metric-box">
-                    <div class="metric-label">{label}</div>
-                    <div class="metric-value">{val}</div>
-                </div>""", unsafe_allow_html=True)
+        c1.metric("Unique Donors",  f"{len(view):,}")
+        c2.metric("Total Raised",   f"${view['total_given'].sum():,.0f}")
+        c3.metric("Median Gift",    f"${df['contribution_receipt_amount'].median():,.0f}")
+        c4.metric("Repeat Donors",  f"{view['repeat_donor'].sum():,}")
+        c5.metric("Multi-Cycle",    f"{view['multi_cycle'].sum():,}")
 
         if search_query:
-            st.caption(f"Showing {len(view):,} donors matching '{search_query}'")
+            st.caption(f"{len(view):,} donors matching '{search_query}'")
 
+        st.divider()
         display_cols = ['contributor_name', 'total_given', 'num_donations', 'largest_gift',
                         'cycles_active', 'employer', 'occupation', 'state', 'city', 'last_donation']
         display_cols = [c for c in display_cols if c in view.columns]
