@@ -148,13 +148,84 @@ with st.sidebar:
     st.divider()
     mode = st.radio(
         "Mode",
-        ["Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
+        ["Organization Directory", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
     )
+
+
+# ─────────────────────────────────────────────
+# MODE 0: ORGANIZATION DIRECTORY
+# ─────────────────────────────────────────────
+ORG_FILE = os.path.join(os.path.dirname(__file__), "ListofOrganizations.xlsx")
+
+@st.cache_data
+def load_org_data():
+    df = pd.read_excel(ORG_FILE, dtype=str)
+    df.columns = df.columns.str.strip()
+    df = df.dropna(subset=['CMTE_ID']).reset_index(drop=True)
+    df['CMTE_ID'] = df['CMTE_ID'].str.strip()
+    return df
+
+if mode == "Organization Directory":
+    st.markdown("## Organization Directory")
+    st.divider()
+    st.caption(f"Local committee database — {len(load_org_data()):,} organizations")
+
+    org_df = load_org_data()
+
+    # --- SEARCH + FILTERS ---
+    col1, col2, col3 = st.columns([3, 1, 1])
+    with col1:
+        q = st.text_input("Search", placeholder="Name, connected org, candidate ID, city...")
+    with col2:
+        states = ["All"] + sorted(org_df["State"].dropna().unique().tolist())
+        state_filter = st.selectbox("State", states)
+    with col3:
+        types = ["All"] + sorted(org_df["Committee type"].dropna().unique().tolist())
+        type_filter = st.selectbox("Committee type", types)
+
+    # apply filters
+    view = org_df.copy()
+    if q:
+        q_lower = q.lower()
+        mask = (
+            view["Committee Name"].str.lower().str.contains(q_lower, na=False) |
+            view["CMTE_ID"].str.lower().str.contains(q_lower, na=False) |
+            view["Connected organization's name"].str.lower().str.contains(q_lower, na=False) |
+            view["Candidate Identification"].str.lower().str.contains(q_lower, na=False) |
+            view["City or Town"].str.lower().str.contains(q_lower, na=False)
+        )
+        view = view[mask]
+    if state_filter != "All":
+        view = view[view["State"] == state_filter]
+    if type_filter != "All":
+        view = view[view["Committee type"] == type_filter]
+
+    st.caption(f"{len(view):,} results")
+
+    DISPLAY_COLS = [
+        "CMTE_ID", "Committee Name", "Committee type", "Committee designation",
+        "Committee party", "Interest group category", "Connected organization's name",
+        "Candidate Identification", "City or Town", "State",
+    ]
+    DISPLAY_COLS = [c for c in DISPLAY_COLS if c in view.columns]
+    st.dataframe(view[DISPLAY_COLS].reset_index(drop=True), use_container_width=True, height=500)
+
+    # --- DRILL-THROUGH ---
+    st.divider()
+    st.markdown("#### Drill into a committee")
+    selected_id = st.text_input("Paste a CMTE_ID from the table above to pull its donors", placeholder="e.g. C00478107")
+    if selected_id:
+        match = org_df[org_df["CMTE_ID"] == selected_id.strip().upper()]
+        if not match.empty:
+            row = match.iloc[0]
+            st.success(f"**{row['Committee Name']}** — switch to *Committee Donor Drill-Down* and paste `{row['CMTE_ID']}` to pull donors.")
+        else:
+            st.warning("ID not found in local directory.")
 
 # ─────────────────────────────────────────────
 # MODE 1
 # ─────────────────────────────────────────────
-if mode == "Top Committees & Candidates":
+elif mode == "Top Committees & Candidates":
     st.markdown("## Top Committees & Candidates by Receipts")
     st.divider()
 
