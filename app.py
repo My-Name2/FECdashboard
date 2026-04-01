@@ -307,7 +307,11 @@ elif mode == "Individual Donors List":
         c4.metric("Median Gift",   f"${view['TRANSACTION_AMOUNT'].median():,.0f}")
 
         st.divider()
-        st.dataframe(view, use_container_width=True, height=600)
+
+        DISPLAY_LIMIT = 5000
+        if len(view) > DISPLAY_LIMIT:
+            st.caption(f"Showing top {DISPLAY_LIMIT:,} of {len(view):,} matching records sorted by amount. Narrow your filters to see more.")
+        st.dataframe(view.head(DISPLAY_LIMIT), use_container_width=True, height=600)
 
 # ─────────────────────────────────────────────
 # MODE 1
