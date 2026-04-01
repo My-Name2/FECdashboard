@@ -148,7 +148,7 @@ with st.sidebar:
     st.divider()
     mode = st.radio(
         "Mode",
-        ["Organization Directory", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
+        ["Organization Directory", "Individual Donors List", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
     )
 
 
@@ -227,6 +227,87 @@ if mode == "Organization Directory":
             st.success(f"**{row['Committee Name']}** — switch to *Committee Donor Drill-Down* and paste `{row['CMTE_ID']}` to pull donors.")
         else:
             st.warning("ID not found in local directory.")
+
+# ─────────────────────────────────────────────
+# MODE: INDIVIDUAL DONORS LIST
+# ─────────────────────────────────────────────
+elif mode == "Individual Donors List":
+    st.markdown("## Individual Donors List (2023–2026)")
+    st.divider()
+
+    import glob
+
+    @st.cache_data
+    def load_donor_parts():
+        base = os.path.dirname(os.path.abspath(__file__))
+        files = sorted(glob.glob(os.path.join(base, "part_*.csv")))
+        if not files:
+            return None, []
+        dfs = []
+        for f in files:
+            df = pd.read_csv(f, dtype=str, encoding="utf-8-sig")
+            df.columns = df.columns.str.strip()
+            dfs.append(df)
+        combined = pd.concat(dfs, ignore_index=True)
+        combined["TRANSACTION_AMOUNT"] = pd.to_numeric(combined["TRANSACTION_AMOUNT"], errors="coerce")
+        combined["TRANSACTION_DATE"]   = pd.to_datetime(combined["TRANSACTION_DATE"], format="%m%d%Y", errors="coerce")
+        return combined, [os.path.basename(f) for f in files]
+
+    donors, loaded_files = load_donor_parts()
+
+    if donors is None:
+        st.warning("No part_*.csv files found in the app directory. Add them to the repo root.")
+    else:
+        st.caption(f"{len(donors):,} records from {len(loaded_files)} files: {', '.join(loaded_files)}")
+
+        # --- FILTERS ---
+        st.markdown("#### Filter")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            name_q = st.text_input("Donor name", placeholder="e.g. SMITH, JOHN")
+        with col2:
+            employer_q = st.text_input("Employer", placeholder="e.g. GOOGLE")
+        with col3:
+            occupation_q = st.text_input("Occupation", placeholder="e.g. ATTORNEY")
+
+        col4, col5, col6, col7 = st.columns(4)
+        with col4:
+            cmte_q = st.text_input("Committee ID", placeholder="e.g. C00401224")
+        with col5:
+            zip_q = st.text_input("Zipcode prefix", placeholder="e.g. 9021")
+        with col6:
+            states_d = ["All"] + sorted(donors["STATE"].dropna().unique().tolist())
+            state_d = st.selectbox("State", states_d, key="donor_state")
+        with col7:
+            min_amt = st.number_input("Min amount ($)", value=0, step=100)
+
+        # apply filters
+        view = donors.copy()
+        if name_q:
+            view = view[view["NAME"].str.contains(name_q, case=False, na=False)]
+        if employer_q:
+            view = view[view["EMPLOYER"].str.contains(employer_q, case=False, na=False)]
+        if occupation_q:
+            view = view[view["OCCUPATION"].str.contains(occupation_q, case=False, na=False)]
+        if cmte_q:
+            view = view[view["CMTE_ID"].str.contains(cmte_q, case=False, na=False)]
+        if zip_q.strip():
+            view = view[view["ZIPCODE"].str.startswith(zip_q.strip(), na=False)]
+        if state_d != "All":
+            view = view[view["STATE"] == state_d]
+        if min_amt > 0:
+            view = view[view["TRANSACTION_AMOUNT"] >= min_amt]
+
+        view = view.sort_values("TRANSACTION_AMOUNT", ascending=False).reset_index(drop=True)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Records",       f"{len(view):,}")
+        c2.metric("Total $",       f"${view['TRANSACTION_AMOUNT'].sum():,.0f}")
+        c3.metric("Unique Donors", f"{view['NAME'].nunique():,}")
+        c4.metric("Median Gift",   f"${view['TRANSACTION_AMOUNT'].median():,.0f}")
+
+        st.divider()
+        st.dataframe(view, use_container_width=True, height=600)
 
 # ─────────────────────────────────────────────
 # MODE 1
