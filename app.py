@@ -581,7 +581,7 @@ elif mode == "Power Map":
                           key="pm_input",
                           on_change=_on_input_change)
         with col2:
-            top_n_nodes = st.slider("Max connections shown", 10, 100, 30)
+            top_n_nodes = st.slider("Max connections shown", 10, 600, 50)
 
         search_term = st.session_state["pm_search"].strip().upper()
 
