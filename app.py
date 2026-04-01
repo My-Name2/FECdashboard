@@ -148,7 +148,7 @@ with st.sidebar:
     st.divider()
     mode = st.radio(
         "Mode",
-        ["Organization Directory", "Individual Donors List", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
+        ["Organization Directory", "Individual Donors List", "Power Map", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
     )
 
 
@@ -308,7 +308,7 @@ elif mode == "Individual Donors List":
 
         st.divider()
 
-        DISPLAY_LIMIT = 500000
+        DISPLAY_LIMIT = 5000
         if len(view) > DISPLAY_LIMIT:
             st.caption(f"Showing top {DISPLAY_LIMIT:,} of {len(view):,} matching records sorted by amount. Narrow your filters to see more.")
         st.dataframe(view.head(DISPLAY_LIMIT), use_container_width=True, height=600)
@@ -457,6 +457,273 @@ elif mode == "Candidate Lookup":
 
             except requests.HTTPError as e:
                 st.error(f"API error: {e}")
+
+
+# ─────────────────────────────────────────────
+# MODE: POWER MAP
+# ─────────────────────────────────────────────
+elif mode == "Power Map":
+    st.markdown("## Donor Power Map")
+    st.divider()
+    st.caption("Search a donor name or committee ID to explore their contribution network. Click any node label to pivot.")
+
+    import glob, json
+
+    @st.cache_data
+    def load_powermap_index():
+        """Build lookup indexes from part CSVs: donor->committees and committee->donors."""
+        base = os.path.dirname(os.path.abspath(__file__))
+        files = sorted(glob.glob(os.path.join(base, "part_*.csv")))
+        if not files:
+            return {}, {}
+        dfs = []
+        for f in files:
+            df = pd.read_csv(f, dtype=str, encoding="utf-8-sig",
+                             usecols=["CMTE_ID", "NAME", "TRANSACTION_AMOUNT", "CITY", "STATE", "EMPLOYER", "OCCUPATION"])
+            dfs.append(df)
+        df = pd.concat(dfs, ignore_index=True)
+        df.columns = df.columns.str.strip()
+        df["TRANSACTION_AMOUNT"] = pd.to_numeric(df["TRANSACTION_AMOUNT"], errors="coerce").fillna(0)
+        df["NAME"]    = df["NAME"].str.strip().str.upper()
+        df["CMTE_ID"] = df["CMTE_ID"].str.strip().str.upper()
+
+        # donor -> {cmte_id: {total, count, ...}}
+        donor_idx = {}
+        for row in df.itertuples():
+            d = donor_idx.setdefault(row.NAME, {})
+            if row.CMTE_ID not in d:
+                d[row.CMTE_ID] = {"total": 0, "count": 0,
+                                  "city": row.CITY, "state": row.STATE,
+                                  "employer": row.EMPLOYER, "occupation": row.OCCUPATION}
+            d[row.CMTE_ID]["total"] += row.TRANSACTION_AMOUNT
+            d[row.CMTE_ID]["count"] += 1
+
+        # cmte -> {donor_name: {total, count}}
+        cmte_idx = {}
+        for row in df.itertuples():
+            d = cmte_idx.setdefault(row.CMTE_ID, {})
+            if row.NAME not in d:
+                d[row.NAME] = {"total": 0, "count": 0}
+            d[row.NAME]["total"] += row.TRANSACTION_AMOUNT
+            d[row.NAME]["count"] += 1
+
+        return donor_idx, cmte_idx
+
+    @st.cache_data
+    def get_committee_name(cmte_id, api_key):
+        try:
+            r = requests.get(f"{BASE_URL}/committees/", params={
+                "api_key": api_key, "committee_id": cmte_id, "per_page": 1
+            }, timeout=5)
+            res = r.json().get("results", [])
+            return res[0]["name"] if res else cmte_id
+        except Exception:
+            return cmte_id
+
+    with st.spinner("Building network index from donor files..."):
+        donor_idx, cmte_idx = load_powermap_index()
+
+    if not donor_idx:
+        st.warning("No part_*.csv files found.")
+    else:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            search_term = st.text_input("Donor name or Committee ID", placeholder="e.g. SMITH, JOHN  or  C00401224")
+        with col2:
+            top_n_nodes = st.slider("Max connections shown", 10, 100, 30)
+
+        search_term = search_term.strip().upper()
+
+        if not search_term:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Unique Donors", f"{len(donor_idx):,}")
+            c2.metric("Unique Committees", f"{len(cmte_idx):,}")
+            c3.metric("Total Transactions", f"{sum(len(v) for v in donor_idx.values()):,}")
+            st.info("Enter a donor name (e.g. SMITH, JOHN) or committee ID (e.g. C00401224) to explore their network.")
+        else:
+            # Determine if it looks like a committee ID or donor name
+            is_cmte = search_term.startswith("C0") and len(search_term) == 9
+
+            # --- FUZZY MATCH if not exact ---
+            if is_cmte:
+                if search_term in cmte_idx:
+                    center_id   = search_term
+                    center_type = "committee"
+                    center_label = get_committee_name(center_id, api_key)
+                    connections  = cmte_idx[center_id]
+                else:
+                    st.warning(f"Committee {search_term} not found in donor data.")
+                    st.stop()
+            else:
+                # fuzzy match on donor name
+                matches = [n for n in donor_idx if search_term in n]
+                if not matches:
+                    st.warning(f"No donors found matching '{search_term}'.")
+                    st.stop()
+                if len(matches) > 1:
+                    chosen = st.selectbox(f"{len(matches)} matches — pick one:", sorted(matches))
+                else:
+                    chosen = matches[0]
+                center_id    = chosen
+                center_type  = "donor"
+                center_label = chosen
+                connections  = donor_idx[chosen]
+
+            # Sort connections by total, take top N
+            sorted_conns = sorted(connections.items(), key=lambda x: x[1]["total"], reverse=True)[:top_n_nodes]
+
+            # Resolve committee names for donor->cmte edges
+            if center_type == "donor":
+                conn_labels = {}
+                for cid, _ in sorted_conns:
+                    conn_labels[cid] = get_committee_name(cid, api_key)
+            else:
+                conn_labels = {name: name for name, _ in sorted_conns}
+
+            # --- METRICS ---
+            total_given = sum(v["total"] for _, v in sorted_conns)
+            st.markdown(f"### {'🏛' if center_type == 'committee' else '👤'} {center_label}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Connections shown", f"{len(sorted_conns):,}")
+            c2.metric("Total connections", f"{len(connections):,}")
+            c3.metric("Total $" if center_type == "committee" else "Total donated",
+                      f"${total_given:,.0f}")
+
+            st.divider()
+
+            # --- BUILD PYVIS / HTML GRAPH ---
+            # We build a pure HTML/JS force graph to avoid pyvis dependency
+            nodes = []
+            edges = []
+
+            center_color = "#c8f542" if center_type == "donor" else "#42b4f5"
+            nodes.append({"id": "CENTER", "label": center_label[:40],
+                          "color": center_color, "size": 30, "font": {"size": 16}})
+
+            for conn_id, stats in sorted_conns:
+                label = conn_labels.get(conn_id, conn_id)
+                short = label[:35] + "…" if len(label) > 35 else label
+                node_color = "#42b4f5" if center_type == "donor" else "#c8f542"
+                amt = stats["total"]
+                size = max(8, min(25, int(amt / 5000)))
+                nodes.append({
+                    "id": conn_id,
+                    "label": short,
+                    "fullLabel": label,
+                    "color": node_color,
+                    "size": size,
+                    "amount": amt,
+                    "count": stats["count"],
+                    "raw_id": conn_id,
+                })
+                edges.append({"from": "CENTER", "to": conn_id,
+                              "value": max(1, int(amt / 1000)),
+                              "title": f"${amt:,.0f} ({stats['count']} txns)"})
+
+            nodes_json = json.dumps(nodes)
+            edges_json = json.dumps(edges)
+            center_type_json = json.dumps(center_type)
+
+            html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css">
+<style>
+  body {{ margin:0; background:#0f0f0f; font-family: monospace; }}
+  #graph {{ width:100%; height:560px; background:#111; border:1px solid #2a2a2a; border-radius:4px; }}
+  #tooltip {{
+    position:absolute; background:#1a1a1a; border:1px solid #333;
+    color:#e8e8e8; padding:10px 14px; border-radius:3px; font-size:12px;
+    pointer-events:none; display:none; max-width:260px; line-height:1.6;
+    font-family:monospace;
+  }}
+  #pivot-hint {{
+    color:#666; font-size:11px; font-family:monospace;
+    padding:6px 12px; letter-spacing:1px;
+  }}
+</style>
+</head>
+<body>
+<div id="pivot-hint">CLICK A NODE TO PIVOT · HOVER FOR DETAILS</div>
+<div id="graph"></div>
+<div id="tooltip"></div>
+<script>
+  var nodes = new vis.DataSet({nodes_json});
+  var edges = new vis.DataSet({edges_json});
+  var centerType = {center_type_json};
+
+  var container = document.getElementById("graph");
+  var data = {{ nodes: nodes, edges: edges }};
+  var options = {{
+    nodes: {{
+      shape: "dot",
+      font: {{ color: "#e8e8e8", face: "monospace" }},
+      borderWidth: 1,
+      borderWidthSelected: 3,
+    }},
+    edges: {{
+      color: {{ color: "#2a2a2a", highlight: "#c8f542" }},
+      smooth: {{ type: "continuous" }},
+      scaling: {{ min: 1, max: 8 }},
+    }},
+    physics: {{
+      stabilization: {{ iterations: 150 }},
+      barnesHut: {{ gravitationalConstant: -8000, springLength: 180 }},
+    }},
+    interaction: {{ hover: true, tooltipDelay: 100 }},
+    background: {{ color: "#0f0f0f" }},
+  }};
+
+  var network = new vis.Network(container, data, options);
+  var tooltip = document.getElementById("tooltip");
+
+  network.on("hoverNode", function(params) {{
+    if (params.node === "CENTER") return;
+    var node = nodes.get(params.node);
+    tooltip.style.display = "block";
+    tooltip.style.left = (params.event.center.x + 15) + "px";
+    tooltip.style.top  = (params.event.center.y - 10) + "px";
+    tooltip.innerHTML =
+      "<b>" + (node.fullLabel || node.label) + "</b><br>" +
+      "Total: $" + node.amount.toLocaleString() + "<br>" +
+      "Transactions: " + node.count;
+  }});
+  network.on("blurNode", function() {{
+    tooltip.style.display = "none";
+  }});
+
+  network.on("click", function(params) {{
+    if (!params.nodes.length || params.nodes[0] === "CENTER") return;
+    var node = nodes.get(params.nodes[0]);
+    var raw  = node.raw_id || node.id;
+    // Send pivot signal to Streamlit via URL hash
+    window.parent.postMessage({{ type: "streamlit:setComponentValue", value: raw }}, "*");
+  }});
+</script>
+</body>
+</html>
+"""
+            st.components.v1.html(html, height=600, scrolling=False)
+
+            # --- CONNECTION TABLE ---
+            st.divider()
+            st.markdown("#### All connections")
+            rows = []
+            for conn_id, stats in sorted_conns:
+                label = conn_labels.get(conn_id, conn_id)
+                rows.append({
+                    "ID" if center_type == "donor" else "Donor": conn_id,
+                    "Name": label if center_type == "donor" else conn_id,
+                    "Total ($)": stats["total"],
+                    "Transactions": stats["count"],
+                })
+            conn_df = pd.DataFrame(rows).sort_values("Total ($)", ascending=False).reset_index(drop=True)
+            st.dataframe(conn_df, use_container_width=True, height=300)
+
+            st.caption("To pivot: copy a committee ID or donor name from the table above and paste it into the search box.")
 
 # ─────────────────────────────────────────────
 # MODE 2
