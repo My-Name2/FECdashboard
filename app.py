@@ -486,6 +486,9 @@ elif mode == "Power Map":
         df["TRANSACTION_AMOUNT"] = pd.to_numeric(df["TRANSACTION_AMOUNT"], errors="coerce").fillna(0)
         df["NAME"]    = df["NAME"].str.strip().str.upper()
         df["CMTE_ID"] = df["CMTE_ID"].str.strip().str.upper()
+        # drop rows with missing name or committee id — causes float NaN errors
+        df = df.dropna(subset=["NAME", "CMTE_ID"])
+        df = df[df["NAME"].str.len() > 0]
 
         # donor -> {cmte_id: {total, count, ...}}
         donor_idx = {}
@@ -850,9 +853,15 @@ else:
                     'contributor_employer', 'contributor_occupation',
                     'contribution_receipt_amount', 'contribution_receipt_date', '_cycle',
                 ]
+                if not all_records:
+                    st.warning("No records returned from FEC API. The committee may have no individual contributions for the selected cycles/minimum amount.")
+                    st.stop()
                 raw   = pd.json_normalize(all_records)
                 avail = [c for c in FIELDS if c in raw.columns]
                 df    = raw[avail].copy()
+                if 'contribution_receipt_amount' not in df.columns:
+                    st.warning(f"Unexpected API response — columns returned: {list(df.columns)}")
+                    st.stop()
                 df['contribution_receipt_amount'] = pd.to_numeric(df['contribution_receipt_amount'], errors='coerce')
                 df['contribution_receipt_date']   = pd.to_datetime(df['contribution_receipt_date'],   errors='coerce')
 
