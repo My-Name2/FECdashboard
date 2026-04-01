@@ -308,7 +308,7 @@ elif mode == "Individual Donors List":
 
         st.divider()
 
-        DISPLAY_LIMIT = 5000
+        DISPLAY_LIMIT = 500000
         if len(view) > DISPLAY_LIMIT:
             st.caption(f"Showing top {DISPLAY_LIMIT:,} of {len(view):,} matching records sorted by amount. Narrow your filters to see more.")
         st.dataframe(view.head(DISPLAY_LIMIT), use_container_width=True, height=600)
