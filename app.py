@@ -155,11 +155,11 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # MODE 0: ORGANIZATION DIRECTORY
 # ─────────────────────────────────────────────
-ORG_FILE = os.path.join(os.path.dirname(__file__), "ListofOrganizations.xlsx")
+ORG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "organizations.csv")
 
 @st.cache_data
 def load_org_data():
-    df = pd.read_excel(ORG_FILE, dtype=str)
+    df = pd.read_csv(ORG_FILE, dtype=str)
     df.columns = df.columns.str.strip()
     df = df.dropna(subset=['CMTE_ID']).reset_index(drop=True)
     df['CMTE_ID'] = df['CMTE_ID'].str.strip()
@@ -173,15 +173,22 @@ if mode == "Organization Directory":
     org_df = load_org_data()
 
     # --- SEARCH + FILTERS ---
-    col1, col2, col3 = st.columns([3, 1, 1])
+    col1, col2 = st.columns([3, 1])
     with col1:
         q = st.text_input("Search", placeholder="Name, connected org, candidate ID, city...")
     with col2:
+        zip_filter = st.text_input("Zipcode", placeholder="e.g. 90210")
+
+    col3, col4, col5 = st.columns(3)
+    with col3:
         states = ["All"] + sorted(org_df["State"].dropna().unique().tolist())
         state_filter = st.selectbox("State", states)
-    with col3:
+    with col4:
         types = ["All"] + sorted(org_df["Committee type"].dropna().unique().tolist())
         type_filter = st.selectbox("Committee type", types)
+    with col5:
+        parties = ["All"] + sorted(org_df["Committee party"].dropna().unique().tolist())
+        party_filter = st.selectbox("Party", parties)
 
     # apply filters
     view = org_df.copy()
@@ -195,20 +202,19 @@ if mode == "Organization Directory":
             view["City or Town"].str.lower().str.contains(q_lower, na=False)
         )
         view = view[mask]
+    if zip_filter.strip():
+        view = view[view["Zipcode"].str.startswith(zip_filter.strip(), na=False)]
     if state_filter != "All":
         view = view[view["State"] == state_filter]
     if type_filter != "All":
         view = view[view["Committee type"] == type_filter]
+    if party_filter != "All":
+        view = view[view["Committee party"] == party_filter]
 
     st.caption(f"{len(view):,} results")
 
-    DISPLAY_COLS = [
-        "CMTE_ID", "Committee Name", "Committee type", "Committee designation",
-        "Committee party", "Interest group category", "Connected organization's name",
-        "Candidate Identification", "City or Town", "State",
-    ]
-    DISPLAY_COLS = [c for c in DISPLAY_COLS if c in view.columns]
-    st.dataframe(view[DISPLAY_COLS].reset_index(drop=True), use_container_width=True, height=500)
+    # show all columns
+    st.dataframe(view.reset_index(drop=True), use_container_width=True, height=500)
 
     # --- DRILL-THROUGH ---
     st.divider()
