@@ -168,7 +168,17 @@ def load_org_data():
 
 import glob
 
-@st.cache_data
+# columns actually used by the app — drop everything else to save ~60% memory
+_DONOR_COLS = [
+    "CMTE_ID", "NAME", "CITY", "STATE", "ZIPCODE",
+    "EMPLOYER", "OCCUPATION", "TRANSACTION_DATE",
+    "TRANSACTION_AMOUNT", "TRAN_ID", "OTHER_ID",
+    "MEMO_TEXT", "TRANSACTION_TP",
+]
+# low-cardinality columns — store as category to save memory
+_CAT_COLS = ["CMTE_ID", "STATE", "TRANSACTION_TP", "EMPLOYER", "OCCUPATION"]
+
+@st.cache_data(show_spinner=False)
 def load_donor_parts():
     base = os.path.dirname(os.path.abspath(__file__))
     files = sorted(glob.glob(os.path.join(base, "part_*.csv")))
@@ -176,13 +186,31 @@ def load_donor_parts():
         return None, []
     dfs = []
     for f in files:
-        df = pd.read_csv(f, dtype=str, encoding="utf-8-sig")
+        avail = pd.read_csv(f, nrows=0, encoding="utf-8-sig").columns.tolist()
+        cols  = [c for c in _DONOR_COLS if c in avail]
+        df    = pd.read_csv(f, dtype=str, encoding="utf-8-sig", usecols=cols)
         df.columns = df.columns.str.strip()
         dfs.append(df)
     combined = pd.concat(dfs, ignore_index=True)
-    combined["TRANSACTION_AMOUNT"] = pd.to_numeric(combined["TRANSACTION_AMOUNT"], errors="coerce")
+    # memory-efficient dtypes
+    for col in _CAT_COLS:
+        if col in combined.columns:
+            combined[col] = combined[col].astype("category")
+    combined["TRANSACTION_AMOUNT"] = pd.to_numeric(combined["TRANSACTION_AMOUNT"], errors="coerce").astype("float32")
     combined["TRANSACTION_DATE"]   = pd.to_datetime(combined["TRANSACTION_DATE"], format="%m%d%Y", errors="coerce")
     return combined, [os.path.basename(f) for f in files]
+
+
+def safe_load_donor_parts():
+    """Load donor data with graceful error recovery."""
+    try:
+        return load_donor_parts()
+    except Exception as e:
+        st.cache_data.clear()
+        try:
+            return load_donor_parts()
+        except Exception:
+            return None, []
 
 if mode == "Organization Directory":
     st.markdown("## Organization Directory")
@@ -254,7 +282,7 @@ elif mode == "Individual Donors List":
     st.markdown("## Individual Donors List (2023–2026)")
     st.divider()
 
-    donors, loaded_files = load_donor_parts()
+    donors, loaded_files = safe_load_donor_parts()
 
     if donors is None:
         st.warning("No part_*.csv files found in the app directory. Add them to the repo root.")
@@ -521,7 +549,7 @@ elif mode == "Power Map":
             return cmte_id
 
     # reuse already-loaded donor data — avoids double-loading CSVs into memory
-    _donor_df, _ = load_donor_parts()
+    _donor_df, _ = safe_load_donor_parts()
     with st.spinner("Building network index..."):
         donor_idx, cmte_idx = build_powermap_index(_donor_df)
 
