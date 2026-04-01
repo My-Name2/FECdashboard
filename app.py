@@ -465,7 +465,7 @@ elif mode == "Candidate Lookup":
 elif mode == "Power Map":
     st.markdown("## Donor Power Map")
     st.divider()
-    st.caption("Search a donor name or committee ID to explore their contribution network. Click any node label to pivot.")
+    st.caption("Search a donor name or committee ID to explore their contribution network. Use the pivot selector below the graph to hop to any connection.")
 
     import glob, json
 
@@ -526,9 +526,16 @@ elif mode == "Power Map":
     if not donor_idx:
         st.warning("No part_*.csv files found.")
     else:
+        # session state pivot support
+        if "pm_search" not in st.session_state:
+            st.session_state["pm_search"] = ""
+
         col1, col2 = st.columns([3, 1])
         with col1:
-            search_term = st.text_input("Donor name or Committee ID", placeholder="e.g. SMITH, JOHN  or  C00401224")
+            search_term = st.text_input("Donor name or Committee ID",
+                                        value=st.session_state["pm_search"],
+                                        placeholder="e.g. SMITH, JOHN  or  C00401224",
+                                        key="pm_input")
         with col2:
             top_n_nodes = st.slider("Max connections shown", 10, 100, 30)
 
@@ -647,7 +654,7 @@ elif mode == "Power Map":
 </style>
 </head>
 <body>
-<div id="pivot-hint">CLICK A NODE TO PIVOT · HOVER FOR DETAILS</div>
+<div id="pivot-hint">HOVER NODES FOR DETAILS · USE PIVOT SELECTOR BELOW TO NAVIGATE</div>
 <div id="graph"></div>
 <div id="tooltip"></div>
 <script>
@@ -723,7 +730,21 @@ elif mode == "Power Map":
             conn_df = pd.DataFrame(rows).sort_values("Total ($)", ascending=False).reset_index(drop=True)
             st.dataframe(conn_df, use_container_width=True, height=300)
 
-            st.caption("To pivot: copy a committee ID or donor name from the table above and paste it into the search box.")
+            st.divider()
+            st.markdown("#### Pivot to a connection")
+            pivot_options = ["— select to pivot —"] + [
+                f"{conn_labels.get(cid, cid)}  [{cid}]" for cid, _ in sorted_conns
+            ] if center_type == "donor" else ["— select to pivot —"] + [
+                f"{name}  [{name}]" for name, _ in sorted_conns
+            ]
+            pivot_choice = st.selectbox("Click a connection to explore their network:", pivot_options, key="pm_pivot")
+            if pivot_choice != "— select to pivot —":
+                # extract the raw ID from brackets
+                import re
+                m = re.search(r"\[(.+?)\]$", pivot_choice)
+                if m:
+                    st.session_state["pm_search"] = m.group(1).strip()
+                    st.rerun()
 
 # ─────────────────────────────────────────────
 # MODE 2
