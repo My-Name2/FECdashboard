@@ -165,6 +165,25 @@ def load_org_data():
     df['CMTE_ID'] = df['CMTE_ID'].str.strip()
     return df
 
+
+import glob
+
+@st.cache_data
+def load_donor_parts():
+    base = os.path.dirname(os.path.abspath(__file__))
+    files = sorted(glob.glob(os.path.join(base, "part_*.csv")))
+    if not files:
+        return None, []
+    dfs = []
+    for f in files:
+        df = pd.read_csv(f, dtype=str, encoding="utf-8-sig")
+        df.columns = df.columns.str.strip()
+        dfs.append(df)
+    combined = pd.concat(dfs, ignore_index=True)
+    combined["TRANSACTION_AMOUNT"] = pd.to_numeric(combined["TRANSACTION_AMOUNT"], errors="coerce")
+    combined["TRANSACTION_DATE"]   = pd.to_datetime(combined["TRANSACTION_DATE"], format="%m%d%Y", errors="coerce")
+    return combined, [os.path.basename(f) for f in files]
+
 if mode == "Organization Directory":
     st.markdown("## Organization Directory")
     st.divider()
@@ -234,24 +253,6 @@ if mode == "Organization Directory":
 elif mode == "Individual Donors List":
     st.markdown("## Individual Donors List (2023–2026)")
     st.divider()
-
-    import glob
-
-    @st.cache_data
-    def load_donor_parts():
-        base = os.path.dirname(os.path.abspath(__file__))
-        files = sorted(glob.glob(os.path.join(base, "part_*.csv")))
-        if not files:
-            return None, []
-        dfs = []
-        for f in files:
-            df = pd.read_csv(f, dtype=str, encoding="utf-8-sig")
-            df.columns = df.columns.str.strip()
-            dfs.append(df)
-        combined = pd.concat(dfs, ignore_index=True)
-        combined["TRANSACTION_AMOUNT"] = pd.to_numeric(combined["TRANSACTION_AMOUNT"], errors="coerce")
-        combined["TRANSACTION_DATE"]   = pd.to_datetime(combined["TRANSACTION_DATE"], format="%m%d%Y", errors="coerce")
-        return combined, [os.path.basename(f) for f in files]
 
     donors, loaded_files = load_donor_parts()
 
