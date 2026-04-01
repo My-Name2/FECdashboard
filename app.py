@@ -467,26 +467,20 @@ elif mode == "Power Map":
     st.divider()
     st.caption("Search a donor name or committee ID to explore their contribution network. Use the pivot selector below the graph to hop to any connection.")
 
-    import glob, json
+    import json
 
     @st.cache_data
-    def load_powermap_index():
-        """Build lookup indexes from part CSVs: donor->committees and committee->donors."""
-        base = os.path.dirname(os.path.abspath(__file__))
-        files = sorted(glob.glob(os.path.join(base, "part_*.csv")))
-        if not files:
+    def build_powermap_index(_df):
+        """Build lookup indexes from already-loaded donor dataframe — avoids re-reading CSVs."""
+        if _df is None or len(_df) == 0:
             return {}, {}
-        dfs = []
-        for f in files:
-            df = pd.read_csv(f, dtype=str, encoding="utf-8-sig",
-                             usecols=["CMTE_ID", "NAME", "TRANSACTION_AMOUNT", "CITY", "STATE", "EMPLOYER", "OCCUPATION"])
-            dfs.append(df)
-        df = pd.concat(dfs, ignore_index=True)
-        df.columns = df.columns.str.strip()
+
+        # work on a slim copy of only needed columns
+        cols = [c for c in ["CMTE_ID", "NAME", "TRANSACTION_AMOUNT", "CITY", "STATE", "EMPLOYER", "OCCUPATION"] if c in _df.columns]
+        df = _df[cols].copy()
         df["TRANSACTION_AMOUNT"] = pd.to_numeric(df["TRANSACTION_AMOUNT"], errors="coerce").fillna(0)
         df["NAME"]    = df["NAME"].str.strip().str.upper()
         df["CMTE_ID"] = df["CMTE_ID"].str.strip().str.upper()
-        # drop rows with missing name or committee id — causes float NaN errors
         df = df.dropna(subset=["NAME", "CMTE_ID"])
         df = df[df["NAME"].str.len() > 0]
 
@@ -496,8 +490,10 @@ elif mode == "Power Map":
             d = donor_idx.setdefault(row.NAME, {})
             if row.CMTE_ID not in d:
                 d[row.CMTE_ID] = {"total": 0, "count": 0,
-                                  "city": row.CITY, "state": row.STATE,
-                                  "employer": row.EMPLOYER, "occupation": row.OCCUPATION}
+                                  "city": getattr(row, "CITY", ""),
+                                  "state": getattr(row, "STATE", ""),
+                                  "employer": getattr(row, "EMPLOYER", ""),
+                                  "occupation": getattr(row, "OCCUPATION", "")}
             d[row.CMTE_ID]["total"] += row.TRANSACTION_AMOUNT
             d[row.CMTE_ID]["count"] += 1
 
@@ -523,8 +519,10 @@ elif mode == "Power Map":
         except Exception:
             return cmte_id
 
-    with st.spinner("Building network index from donor files..."):
-        donor_idx, cmte_idx = load_powermap_index()
+    # reuse already-loaded donor data — avoids double-loading CSVs into memory
+    _donor_df, _ = load_donor_parts()
+    with st.spinner("Building network index..."):
+        donor_idx, cmte_idx = build_powermap_index(_donor_df)
 
     if not donor_idx:
         st.warning("No part_*.csv files found.")
@@ -580,7 +578,7 @@ elif mode == "Power Map":
                     st.stop()
             else:
                 # fuzzy match on donor name
-                matches = [n for n in donor_idx if search_term in n]
+                matches = [n for n in donor_idx if isinstance(n, str) and search_term in n]
                 if not matches:
                     st.warning(f"No donors found matching '{search_term}'.")
                     st.stop()
