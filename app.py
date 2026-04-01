@@ -526,20 +526,34 @@ elif mode == "Power Map":
     if not donor_idx:
         st.warning("No part_*.csv files found.")
     else:
-        # session state pivot support
+        # session state pivot support — pm_search drives the input, not the other way
         if "pm_search" not in st.session_state:
             st.session_state["pm_search"] = ""
 
+        def _do_pivot():
+            import re as _re
+            val = st.session_state.get("pm_pivot", "")
+            if val and val != "— select to pivot —":
+                m = _re.search(r"\[(.+?)\]$", val)
+                if m:
+                    st.session_state["pm_search"] = m.group(1).strip()
+                    # reset pivot selector
+                    st.session_state["pm_pivot"] = "— select to pivot —"
+
+        def _on_input_change():
+            st.session_state["pm_search"] = st.session_state["pm_input"].strip().upper()
+
         col1, col2 = st.columns([3, 1])
         with col1:
-            search_term = st.text_input("Donor name or Committee ID",
-                                        value=st.session_state["pm_search"],
-                                        placeholder="e.g. SMITH, JOHN  or  C00401224",
-                                        key="pm_input")
+            st.text_input("Donor name or Committee ID",
+                          value=st.session_state["pm_search"],
+                          placeholder="e.g. SMITH, JOHN  or  C00401224",
+                          key="pm_input",
+                          on_change=_on_input_change)
         with col2:
             top_n_nodes = st.slider("Max connections shown", 10, 100, 30)
 
-        search_term = search_term.strip().upper()
+        search_term = st.session_state["pm_search"].strip().upper()
 
         if not search_term:
             c1, c2, c3 = st.columns(3)
@@ -737,14 +751,7 @@ elif mode == "Power Map":
             ] if center_type == "donor" else ["— select to pivot —"] + [
                 f"{name}  [{name}]" for name, _ in sorted_conns
             ]
-            pivot_choice = st.selectbox("Click a connection to explore their network:", pivot_options, key="pm_pivot")
-            if pivot_choice != "— select to pivot —":
-                # extract the raw ID from brackets
-                import re
-                m = re.search(r"\[(.+?)\]$", pivot_choice)
-                if m:
-                    st.session_state["pm_search"] = m.group(1).strip()
-                    st.rerun()
+            st.selectbox("Pivot to a connection:", pivot_options, key="pm_pivot", on_change=_do_pivot)
 
 # ─────────────────────────────────────────────
 # MODE 2
