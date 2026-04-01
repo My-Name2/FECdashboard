@@ -155,11 +155,11 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # MODE 0: ORGANIZATION DIRECTORY
 # ─────────────────────────────────────────────
-ORG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "organizations.csv")
+ORG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ListofOrganizations.xlsx")
 
 @st.cache_data
 def load_org_data():
-    df = pd.read_csv(ORG_FILE, dtype=str)
+    df = pd.read_excel(ORG_FILE, dtype=str)
     df.columns = df.columns.str.strip()
     df = df.dropna(subset=['CMTE_ID']).reset_index(drop=True)
     df['CMTE_ID'] = df['CMTE_ID'].str.strip()
