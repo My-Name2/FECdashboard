@@ -260,8 +260,32 @@ if mode == "Organization Directory":
 
     st.caption(f"{len(view):,} results")
 
-    # show all columns
-    st.dataframe(view.reset_index(drop=True), use_container_width=True, height=500)
+    # --- ENRICH WITH DONOR TOTALS FROM LOCAL DATA ---
+    @st.cache_data(show_spinner=False)
+    def build_cmte_totals(_donor_df):
+        if _donor_df is None:
+            return {}
+        grp = _donor_df.groupby("CMTE_ID", observed=True)["TRANSACTION_AMOUNT"].agg(
+            total_raised="sum", num_donations="count"
+        ).reset_index()
+        grp["CMTE_ID"] = grp["CMTE_ID"].astype(str)
+        return grp.set_index("CMTE_ID").to_dict("index")
+
+    donor_df, _ = safe_load_donor_parts()
+    cmte_totals  = build_cmte_totals(donor_df)
+
+    enriched = view.copy().reset_index(drop=True)
+    enriched["Total Raised (local data)"] = enriched["CMTE_ID"].map(
+        lambda x: f"${cmte_totals[x]['total_raised']:,.0f}" if x in cmte_totals else "—"
+    )
+    enriched["# Donations (local data)"] = enriched["CMTE_ID"].map(
+        lambda x: f"{int(cmte_totals[x]['num_donations']):,}" if x in cmte_totals else "—"
+    )
+
+    # reorder so money cols appear early
+    front = ["CMTE_ID", "Committee Name", "Total Raised (local data)", "# Donations (local data)"]
+    rest  = [c for c in enriched.columns if c not in front]
+    st.dataframe(enriched[front + rest], use_container_width=True, height=500)
 
     # --- DRILL-THROUGH ---
     st.divider()
@@ -303,7 +327,7 @@ elif mode == "Individual Donors List":
         with col4:
             cmte_q = st.text_input("Committee ID", placeholder="e.g. C00401224")
         with col5:
-            zip_q = st.text_input("Zipcode prefix", placeholder="e.g. 9021")
+            zip_q = st.text_input("Zipcodes", placeholder="e.g. 43894, 45346, 29932 (comma-separated, prefix ok)")
         with col6:
             states_d = ["All"] + sorted(donors["STATE"].dropna().unique().tolist())
             state_d = st.selectbox("State", states_d, key="donor_state")
@@ -321,7 +345,16 @@ elif mode == "Individual Donors List":
         if cmte_q:
             view = view[view["CMTE_ID"].str.contains(cmte_q, case=False, na=False)]
         if zip_q.strip():
-            view = view[view["ZIPCODE"].str.startswith(zip_q.strip(), na=False)]
+            zip_list = [z.strip() for z in zip_q.split(",") if z.strip()]
+            if len(zip_list) == 1:
+                # single entry — prefix match
+                view = view[view["ZIPCODE"].str.startswith(zip_list[0], na=False)]
+            else:
+                # multiple entries — match any (prefix match per entry)
+                mask = pd.Series([False] * len(view), index=view.index)
+                for z in zip_list:
+                    mask = mask | view["ZIPCODE"].str.startswith(z, na=False)
+                view = view[mask]
         if state_d != "All":
             view = view[view["STATE"] == state_d]
         if min_amt > 0:
