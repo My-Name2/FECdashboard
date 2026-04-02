@@ -275,12 +275,15 @@ if mode == "Organization Directory":
     cmte_totals  = build_cmte_totals(donor_df)
 
     enriched = view.copy().reset_index(drop=True)
-    enriched["Total Raised (local data)"] = enriched["CMTE_ID"].map(
-        lambda x: f"${cmte_totals[x]['total_raised']:,.0f}" if x in cmte_totals else "—"
+    enriched["Total Raised (local data)"] = pd.to_numeric(
+        enriched["CMTE_ID"].map(lambda x: cmte_totals[x]["total_raised"] if x in cmte_totals else None),
+        errors="coerce"
     )
-    enriched["# Donations (local data)"] = enriched["CMTE_ID"].map(
-        lambda x: f"{int(cmte_totals[x]['num_donations']):,}" if x in cmte_totals else "—"
+    enriched["# Donations (local data)"] = pd.to_numeric(
+        enriched["CMTE_ID"].map(lambda x: cmte_totals[x]["num_donations"] if x in cmte_totals else None),
+        errors="coerce"
     )
+    enriched = enriched.sort_values("Total Raised (local data)", ascending=False, na_position="last").reset_index(drop=True)
 
     # reorder so money cols appear early
     front = ["CMTE_ID", "Committee Name", "Total Raised (local data)", "# Donations (local data)"]
