@@ -148,7 +148,7 @@ with st.sidebar:
     st.divider()
     mode = st.radio(
         "Mode",
-        ["Organization Directory", "Individual Donors List", "Power Map", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
+        ["Organization Directory", "Individual Donors List", "Prospect Scorer", "Industry Intel", "Power Map", "Top Committees & Candidates", "Committee Donor Drill-Down", "Candidate Lookup"],
     )
 
 
@@ -377,6 +377,191 @@ elif mode == "Individual Donors List":
         if len(view) > DISPLAY_LIMIT:
             st.caption(f"Showing top {DISPLAY_LIMIT:,} of {len(view):,} matching records sorted by amount. Narrow your filters to see more.")
         st.dataframe(view.head(DISPLAY_LIMIT), use_container_width=True, height=600)
+
+        # ── GEOGRAPHIC HEAT SUMMARY ──────────────────────────────────────
+        st.divider()
+        st.markdown("#### Geographic Heat Summary")
+        st.caption("Breakdown of filtered records by geography — useful for canvassing targeting.")
+        if len(view) > 0:
+            geo_col1, geo_col2 = st.columns(2)
+            with geo_col1:
+                st.markdown("**By State**")
+                state_grp = view.groupby("STATE").agg(
+                    total_raised=("TRANSACTION_AMOUNT","sum"),
+                    unique_donors=("NAME","nunique"),
+                    num_donations=("TRANSACTION_AMOUNT","count"),
+                ).reset_index()
+                state_grp["avg_gift"] = (state_grp["total_raised"] / state_grp["num_donations"]).round(0)
+                state_grp = state_grp.sort_values("total_raised", ascending=False).reset_index(drop=True)
+                st.dataframe(state_grp, use_container_width=True, height=300)
+            with geo_col2:
+                st.markdown("**By City**")
+                city_grp = view.groupby(["CITY","STATE"]).agg(
+                    total_raised=("TRANSACTION_AMOUNT","sum"),
+                    unique_donors=("NAME","nunique"),
+                    num_donations=("TRANSACTION_AMOUNT","count"),
+                ).reset_index()
+                city_grp["avg_gift"] = (city_grp["total_raised"] / city_grp["num_donations"]).round(0)
+                city_grp = city_grp.sort_values("total_raised", ascending=False).reset_index(drop=True)
+                st.dataframe(city_grp, use_container_width=True, height=300)
+        else:
+            st.info("No records match current filters.")
+
+        # ── REPEAT DONOR FINDER ──────────────────────────────────────────
+        st.divider()
+        st.markdown("#### Repeat Donor Finder")
+        st.caption("Donors in the filtered set who gave to multiple committees — high-value recurring prospects.")
+        if len(view) > 0:
+            repeat = view.groupby("NAME").agg(
+                total_given=("TRANSACTION_AMOUNT","sum"),
+                num_donations=("TRANSACTION_AMOUNT","count"),
+                num_committees=("CMTE_ID","nunique"),
+                employer=("EMPLOYER", lambda x: ", ".join(x.dropna().astype(str).unique()[:2])),
+                occupation=("OCCUPATION", lambda x: ", ".join(x.dropna().astype(str).unique()[:2])),
+                state=("STATE", lambda x: "/".join(x.dropna().astype(str).unique())),
+                city=("CITY", lambda x: ", ".join(x.dropna().astype(str).unique()[:2])),
+            ).reset_index()
+            repeat = repeat[repeat["num_committees"] > 1].sort_values("total_given", ascending=False).reset_index(drop=True)
+            repeat.index += 1
+            st.metric("Multi-committee donors in filtered set", f"{len(repeat):,}")
+            st.dataframe(repeat, use_container_width=True, height=400)
+        else:
+            st.info("No records match current filters.")
+
+
+# ─────────────────────────────────────────────
+# MODE: PROSPECT SCORER
+# ─────────────────────────────────────────────
+elif mode == "Prospect Scorer":
+    st.markdown("## Prospect Scorer")
+    st.divider()
+    st.caption("RFM-style scoring (Recency · Frequency · Monetary) across your donor dataset. Produces a ranked prospect list.")
+
+    _df, _ = safe_load_donor_parts()
+    if _df is None:
+        st.warning("No donor data found.")
+    else:
+        with st.spinner("Scoring donors..."):
+            sc = _df.copy()
+            sc["TRANSACTION_AMOUNT"] = pd.to_numeric(sc["TRANSACTION_AMOUNT"], errors="coerce")
+            sc["TRANSACTION_DATE"]   = pd.to_datetime(sc["TRANSACTION_DATE"], errors="coerce")
+            sc = sc.dropna(subset=["NAME","TRANSACTION_AMOUNT"])
+
+            agg = sc.groupby("NAME").agg(
+                total_given      = ("TRANSACTION_AMOUNT","sum"),
+                num_donations    = ("TRANSACTION_AMOUNT","count"),
+                num_committees   = ("CMTE_ID","nunique"),
+                last_donation    = ("TRANSACTION_DATE","max"),
+                largest_gift     = ("TRANSACTION_AMOUNT","max"),
+                avg_gift         = ("TRANSACTION_AMOUNT","mean"),
+                employer         = ("EMPLOYER", lambda x: ", ".join(x.dropna().astype(str).unique()[:2])),
+                occupation       = ("OCCUPATION", lambda x: ", ".join(x.dropna().astype(str).unique()[:2])),
+                state            = ("STATE", lambda x: "/".join(x.dropna().astype(str).unique())),
+                city             = ("CITY",  lambda x: ", ".join(x.dropna().astype(str).unique()[:2])),
+            ).reset_index()
+
+            # --- RFM SCORING ---
+            # Recency: days since last donation (lower = better)
+            ref_date = sc["TRANSACTION_DATE"].max()
+            agg["days_since"] = (ref_date - agg["last_donation"]).dt.days.fillna(9999)
+            agg["R"] = pd.qcut(agg["days_since"].rank(method="first"), 4, labels=[4,3,2,1]).astype(int)
+            agg["F"] = pd.qcut(agg["num_donations"].rank(method="first"), 4, labels=[1,2,3,4]).astype(int)
+            agg["M"] = pd.qcut(agg["total_given"].rank(method="first"), 4, labels=[1,2,3,4]).astype(int)
+            agg["rfm_score"] = agg["R"] + agg["F"] + agg["M"]
+
+            # Tier labels
+            def tier(score):
+                if score >= 11: return "A — Champion"
+                if score >= 8:  return "B — Loyal"
+                if score >= 5:  return "C — Potential"
+                return           "D — Lapsed"
+            agg["tier"] = agg["rfm_score"].apply(tier)
+
+            agg = agg.sort_values("rfm_score", ascending=False).reset_index(drop=True)
+            agg.index += 1
+
+        # filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            tier_filter = st.multiselect("Filter by tier", ["A — Champion","B — Loyal","C — Potential","D — Lapsed"],
+                                          default=["A — Champion","B — Loyal"])
+        with col2:
+            min_score = st.number_input("Min RFM score", value=0, min_value=0, max_value=12, step=1)
+        with col3:
+            state_sc = st.text_input("State filter", placeholder="e.g. OH")
+
+        scored_view = agg.copy()
+        if tier_filter:
+            scored_view = scored_view[scored_view["tier"].isin(tier_filter)]
+        if min_score > 0:
+            scored_view = scored_view[scored_view["rfm_score"] >= min_score]
+        if state_sc.strip():
+            scored_view = scored_view[scored_view["state"].str.contains(state_sc.strip().upper(), na=False)]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Prospects", f"{len(scored_view):,}")
+        c2.metric("Total $ (filtered)", f"${scored_view['total_given'].sum():,.0f}")
+        c3.metric("Avg gift", f"${scored_view['avg_gift'].mean():,.0f}")
+        c4.metric("Champions", f"{(scored_view['tier']=='A — Champion').sum():,}")
+
+        st.divider()
+        display_cols = ["tier","rfm_score","NAME","total_given","num_donations","num_committees",
+                        "largest_gift","avg_gift","last_donation","employer","occupation","state","city"]
+        display_cols = [c for c in display_cols if c in scored_view.columns]
+        st.dataframe(scored_view[display_cols].head(5000), use_container_width=True, height=600)
+
+# ─────────────────────────────────────────────
+# MODE: INDUSTRY INTEL
+# ─────────────────────────────────────────────
+elif mode == "Industry Intel":
+    st.markdown("## Industry Intel")
+    st.divider()
+    st.caption("Roll up donations by employer or occupation — see which industries and companies are most politically active.")
+
+    _df, _ = safe_load_donor_parts()
+    if _df is None:
+        st.warning("No donor data found.")
+    else:
+        pivot = st.radio("Group by", ["Employer","Occupation"], horizontal=True, key="intel_pivot")
+        col1, col2 = st.columns(2)
+        with col1:
+            intel_q = st.text_input("Search", placeholder=f"Filter {pivot.lower()}...")
+        with col2:
+            intel_state = st.text_input("State", placeholder="e.g. OH — leave blank for all")
+
+        grp_col = "EMPLOYER" if pivot == "Employer" else "OCCUPATION"
+
+        with st.spinner("Aggregating..."):
+            df_i = _df.copy()
+            df_i["TRANSACTION_AMOUNT"] = pd.to_numeric(df_i["TRANSACTION_AMOUNT"], errors="coerce")
+            df_i = df_i.dropna(subset=[grp_col, "TRANSACTION_AMOUNT"])
+            df_i = df_i[df_i[grp_col].astype(str).str.strip() != ""]
+
+            if intel_state.strip():
+                df_i = df_i[df_i["STATE"].astype(str).str.upper() == intel_state.strip().upper()]
+
+            grp = df_i.groupby(grp_col, observed=True).agg(
+                total_given      = ("TRANSACTION_AMOUNT","sum"),
+                num_donations    = ("TRANSACTION_AMOUNT","count"),
+                unique_donors    = ("NAME","nunique"),
+                num_committees   = ("CMTE_ID","nunique"),
+                avg_gift         = ("TRANSACTION_AMOUNT","mean"),
+                top_state        = ("STATE", lambda x: x.value_counts().index[0] if len(x) else "—"),
+            ).reset_index()
+            grp["avg_gift"] = grp["avg_gift"].round(0)
+            grp = grp.sort_values("total_given", ascending=False).reset_index(drop=True)
+            grp.index += 1
+
+            if intel_q.strip():
+                grp = grp[grp[grp_col].astype(str).str.contains(intel_q.strip(), case=False, na=False)]
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric(f"Unique {pivot}s", f"{len(grp):,}")
+        c2.metric("Total $",          f"${grp['total_given'].sum():,.0f}")
+        c3.metric("Total Donors",     f"{grp['unique_donors'].sum():,}")
+
+        st.divider()
+        st.dataframe(grp.head(5000), use_container_width=True, height=600)
 
 # ─────────────────────────────────────────────
 # MODE 1
@@ -818,6 +1003,38 @@ elif mode == "Power Map":
                 f"{name}  [{name}]" for name, _ in sorted_conns
             ]
             st.selectbox("Pivot to a connection:", pivot_options, key="pm_pivot", on_change=_do_pivot)
+
+        # ── COMMITTEE OVERLAP ANALYSIS ───────────────────────────────────
+        st.divider()
+        st.markdown("#### Committee Overlap Analysis")
+        st.caption("Find donors who gave to BOTH of two committees — crossover prospects.")
+        ov_col1, ov_col2 = st.columns(2)
+        with ov_col1:
+            cmte_a = st.text_input("Committee A", placeholder="e.g. C00401224", key="ov_a")
+        with ov_col2:
+            cmte_b = st.text_input("Committee B", placeholder="e.g. C00694323", key="ov_b")
+        if cmte_a.strip() and cmte_b.strip():
+            a_id = cmte_a.strip().upper()
+            b_id = cmte_b.strip().upper()
+            donors_a = set(cmte_idx.get(a_id, {}).keys())
+            donors_b = set(cmte_idx.get(b_id, {}).keys())
+            overlap   = donors_a & donors_b
+            if not overlap:
+                st.info(f"No donors found in common between {a_id} and {b_id}.")
+            else:
+                st.metric("Shared donors", f"{len(overlap):,}")
+                rows_ov = []
+                for name in overlap:
+                    a_stats = cmte_idx[a_id].get(name, {})
+                    b_stats = cmte_idx[b_id].get(name, {})
+                    rows_ov.append({
+                        "Donor":         name,
+                        f"$ to A ({a_id})": a_stats.get("total", 0),
+                        f"$ to B ({b_id})": b_stats.get("total", 0),
+                        "Combined $":    a_stats.get("total", 0) + b_stats.get("total", 0),
+                    })
+                ov_df = pd.DataFrame(rows_ov).sort_values("Combined $", ascending=False).reset_index(drop=True)
+                st.dataframe(ov_df, use_container_width=True, height=400)
 
 # ─────────────────────────────────────────────
 # MODE 2
