@@ -173,7 +173,7 @@ _DONOR_COLS = [
     "CMTE_ID", "NAME", "CITY", "STATE", "ZIPCODE",
     "EMPLOYER", "OCCUPATION", "TRANSACTION_DATE",
     "TRANSACTION_AMOUNT", "TRAN_ID", "OTHER_ID",
-    "MEMO_TEXT", "TRANSACTION_TP",
+    "MEMO_TEXT", "TRANSACTION_TP", "IMAGE_NUM",
 ]
 # low-cardinality columns — store as category to save memory
 _CAT_COLS = ["CMTE_ID", "STATE", "TRANSACTION_TP", "EMPLOYER", "OCCUPATION"]
@@ -350,10 +350,8 @@ elif mode == "Individual Donors List":
         if zip_q.strip():
             zip_list = [z.strip() for z in zip_q.split(",") if z.strip()]
             if len(zip_list) == 1:
-                # single entry — prefix match
                 view = view[view["ZIPCODE"].str.startswith(zip_list[0], na=False)]
             else:
-                # multiple entries — match any (prefix match per entry)
                 mask = pd.Series([False] * len(view), index=view.index)
                 for z in zip_list:
                     mask = mask | view["ZIPCODE"].str.startswith(z, na=False)
@@ -376,7 +374,20 @@ elif mode == "Individual Donors List":
         DISPLAY_LIMIT = 5000
         if len(view) > DISPLAY_LIMIT:
             st.caption(f"Showing top {DISPLAY_LIMIT:,} of {len(view):,} matching records sorted by amount. Narrow your filters to see more.")
-        st.dataframe(view.head(DISPLAY_LIMIT), use_container_width=True, height=600)
+
+        # Build filing link column
+        display_view = view.head(DISPLAY_LIMIT).copy()
+        if "IMAGE_NUM" in display_view.columns:
+            display_view["Filing"] = display_view["IMAGE_NUM"].apply(
+                lambda x: f"https://docquery.fec.gov/cgi-bin/fecimg/?{x}" if pd.notna(x) and str(x).strip() else None
+            )
+        st.dataframe(
+            display_view,
+            use_container_width=True, height=600,
+            column_config={
+                "Filing": st.column_config.LinkColumn("Filing", display_text="📄 View"),
+            },
+        )
 
         # ── GEOGRAPHIC HEAT SUMMARY ──────────────────────────────────────
         st.divider()
@@ -546,7 +557,6 @@ elif mode == "Candidate Lookup":
                 if not results:
                     st.warning("No committees found for that candidate ID.")
                 else:
-                    # also fetch candidate name
                     rc = requests.get(f'{BASE_URL}/candidate/{cand_id_input.strip()}/', params={'api_key': api_key})
                     cand_name = rc.json()['results'][0]['name'] if rc.ok and rc.json().get('results') else cand_id_input
 
@@ -591,7 +601,6 @@ elif mode == "Power Map":
         if _df is None or len(_df) == 0:
             return {}, {}
 
-        # work on a slim copy of only needed columns
         cols = [c for c in ["CMTE_ID", "NAME", "TRANSACTION_AMOUNT", "CITY", "STATE", "EMPLOYER", "OCCUPATION"] if c in _df.columns]
         df = _df[cols].copy()
         df["TRANSACTION_AMOUNT"] = pd.to_numeric(df["TRANSACTION_AMOUNT"], errors="coerce").fillna(0)
@@ -600,7 +609,6 @@ elif mode == "Power Map":
         df = df.dropna(subset=["NAME", "CMTE_ID"])
         df = df[df["NAME"].str.len() > 0]
 
-        # donor -> {cmte_id: {total, count, ...}}
         donor_idx = {}
         for row in df.itertuples():
             d = donor_idx.setdefault(row.NAME, {})
@@ -613,7 +621,6 @@ elif mode == "Power Map":
             d[row.CMTE_ID]["total"] += row.TRANSACTION_AMOUNT
             d[row.CMTE_ID]["count"] += 1
 
-        # cmte -> {donor_name: {total, count}}
         cmte_idx = {}
         for row in df.itertuples():
             d = cmte_idx.setdefault(row.CMTE_ID, {})
@@ -635,7 +642,6 @@ elif mode == "Power Map":
         except Exception:
             return cmte_id
 
-    # reuse already-loaded donor data — avoids double-loading CSVs into memory
     _donor_df, _ = safe_load_donor_parts()
     with st.spinner("Building network index..."):
         donor_idx, cmte_idx = build_powermap_index(_donor_df)
@@ -643,7 +649,6 @@ elif mode == "Power Map":
     if not donor_idx:
         st.warning("No part_*.csv files found.")
     else:
-        # session state pivot support — pm_search drives the input, not the other way
         if "pm_search" not in st.session_state:
             st.session_state["pm_search"] = ""
 
@@ -654,7 +659,6 @@ elif mode == "Power Map":
                 m = _re.search(r"\[(.+?)\]$", val)
                 if m:
                     st.session_state["pm_search"] = m.group(1).strip()
-                    # reset pivot selector
                     st.session_state["pm_pivot"] = "— select to pivot —"
 
         def _on_input_change():
@@ -679,10 +683,8 @@ elif mode == "Power Map":
             c3.metric("Total Transactions", f"{sum(len(v) for v in donor_idx.values()):,}")
             st.info("Enter a donor name (e.g. SMITH, JOHN) or committee ID (e.g. C00401224) to explore their network.")
         else:
-            # Determine if it looks like a committee ID or donor name
             is_cmte = search_term.startswith("C0") and len(search_term) == 9
 
-            # --- FUZZY MATCH if not exact ---
             if is_cmte:
                 if search_term in cmte_idx:
                     center_id   = search_term
@@ -693,7 +695,6 @@ elif mode == "Power Map":
                     st.warning(f"Committee {search_term} not found in donor data.")
                     st.stop()
             else:
-                # fuzzy match on donor name
                 matches = [n for n in donor_idx if isinstance(n, str) and search_term in n]
                 if not matches:
                     st.warning(f"No donors found matching '{search_term}'.")
@@ -707,10 +708,8 @@ elif mode == "Power Map":
                 center_label = chosen
                 connections  = donor_idx[chosen]
 
-            # Sort connections by total, take top N
             sorted_conns = sorted(connections.items(), key=lambda x: x[1]["total"], reverse=True)[:top_n_nodes]
 
-            # Resolve committee names for donor->cmte edges
             if center_type == "donor":
                 conn_labels = {}
                 for cid, _ in sorted_conns:
@@ -718,7 +717,6 @@ elif mode == "Power Map":
             else:
                 conn_labels = {name: name for name, _ in sorted_conns}
 
-            # --- METRICS ---
             total_given = sum(v["total"] for _, v in sorted_conns)
             st.markdown(f"### {'🏛' if center_type == 'committee' else '👤'} {center_label}")
             c1, c2, c3 = st.columns(3)
@@ -729,8 +727,6 @@ elif mode == "Power Map":
 
             st.divider()
 
-            # --- BUILD PYVIS / HTML GRAPH ---
-            # We build a pure HTML/JS force graph to avoid pyvis dependency
             nodes = []
             edges = []
 
@@ -837,7 +833,6 @@ elif mode == "Power Map":
     if (!params.nodes.length || params.nodes[0] === "CENTER") return;
     var node = nodes.get(params.nodes[0]);
     var raw  = node.raw_id || node.id;
-    // Send pivot signal to Streamlit via URL hash
     window.parent.postMessage({{ type: "streamlit:setComponentValue", value: raw }}, "*");
   }});
 </script>
@@ -846,7 +841,6 @@ elif mode == "Power Map":
 """
             st.components.v1.html(html, height=600, scrolling=False)
 
-            # --- CONNECTION TABLE ---
             st.divider()
             st.markdown("#### All connections")
             rows = []
@@ -903,7 +897,7 @@ elif mode == "Power Map":
                 st.dataframe(ov_df, use_container_width=True, height=400)
 
 # ─────────────────────────────────────────────
-# MODE 2
+# MODE 2: COMMITTEE DONOR DRILL-DOWN
 # ─────────────────────────────────────────────
 else:
     st.markdown("## Committee Donor Drill-Down")
@@ -929,7 +923,6 @@ else:
             try:
                 raw_id = committee_id_raw.strip().upper()
 
-                # Auto-resolve candidate ID -> principal committee ID
                 if raw_id.startswith(('H', 'S', 'P')):
                     with st.spinner(f"Resolving candidate {raw_id} to committee..."):
                         r = requests.get(f'{BASE_URL}/candidate/{raw_id}/committees/', params={
@@ -998,6 +991,7 @@ else:
                     'contributor_name', 'contributor_city', 'contributor_state',
                     'contributor_employer', 'contributor_occupation',
                     'contribution_receipt_amount', 'contribution_receipt_date', '_cycle',
+                    'image_number',
                 ]
                 if not all_records:
                     st.warning("No records returned from FEC API. The committee may have no individual contributions for the selected cycles/minimum amount.")
@@ -1010,6 +1004,12 @@ else:
                     st.stop()
                 df['contribution_receipt_amount'] = pd.to_numeric(df['contribution_receipt_amount'], errors='coerce')
                 df['contribution_receipt_date']   = pd.to_datetime(df['contribution_receipt_date'],   errors='coerce')
+
+                # Add filing link to raw data
+                if 'image_number' in df.columns:
+                    df['Filing'] = df['image_number'].apply(
+                        lambda x: f"https://docquery.fec.gov/cgi-bin/fecimg/?{x}" if pd.notna(x) and str(x).strip() else None
+                    )
 
                 agg = df.groupby('contributor_name').agg(
                     total_given    = ('contribution_receipt_amount', 'sum'),
@@ -1065,3 +1065,28 @@ else:
                         'cycles_active', 'employer', 'occupation', 'state', 'city', 'last_donation']
         display_cols = [c for c in display_cols if c in view.columns]
         st.dataframe(view[display_cols], use_container_width=True, height=600)
+
+        # --- RAW TRANSACTION DETAIL WITH FILING LINKS ---
+        st.divider()
+        st.markdown("#### Transaction Detail (with filing links)")
+        st.caption("Click 📄 View to open the original FEC filing image for any transaction.")
+
+        detail_view = df.copy()
+        if search_query:
+            detail_view = detail_view[
+                detail_view['contributor_name'].str.contains(search_query, case=False, na=False) |
+                detail_view.get('contributor_employer', pd.Series(dtype=str)).str.contains(search_query, case=False, na=False)
+            ]
+        detail_view = detail_view.sort_values('contribution_receipt_amount', ascending=False).head(2000).reset_index(drop=True)
+
+        detail_cols = [c for c in ['contributor_name', 'contribution_receipt_amount',
+                                    'contribution_receipt_date', '_cycle',
+                                    'contributor_employer', 'contributor_occupation',
+                                    'contributor_city', 'contributor_state', 'Filing'] if c in detail_view.columns]
+        st.dataframe(
+            detail_view[detail_cols],
+            use_container_width=True, height=500,
+            column_config={
+                "Filing": st.column_config.LinkColumn("Filing", display_text="📄 View"),
+            },
+        )
